@@ -1,0 +1,1563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Capital Game (vs AI)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f0f4f8; }
+        #board {
+            /* Updated Grid setup for 9 rows x 13 columns */
+            grid-template-columns: repeat(13, minmax(0, 1fr));
+        }
+        .tile {
+            position: relative;
+            aspect-ratio: 1 / 1;
+            transition: transform 0.1s, box-shadow 0.1s;
+            cursor: default;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            color: #1e3a8a;
+            border: 1px solid #d1d5db;
+            padding: 2px;
+        }
+        .tile-interactive:hover {
+            cursor: pointer;
+            box-shadow: inset 0 0 0 2px #4f46e5;
+            transform: scale(1.02);
+            z-index: 20;
+        }
+        .player-token {
+            width: 0.8rem;
+            height: 0.8rem;
+            border-radius: 50%;
+            border: 1px solid white;
+            position: absolute;
+            z-index: 10;
+        }
+        .level-1 { background-color: #fef08a; color: #b45309; }
+        .level-2 { background-color: #fcd34d; color: #78350f; }
+        .tile-owner-bank { background-color: #e5e7eb; }
+        /* Peripheral Subway Stations */
+        .tile-subway { background-color: #374151; color: #f3f4f6 !important; border: 3px solid #f97316; font-weight: bold; font-size: 0.65rem; line-height: 1.1; }
+        /* City Center / Park style */
+        .tile-city-center { background-color: #10b981; color: #ecfdf5 !important; border: 3px solid #15803d; font-weight: bold; font-size: 0.65rem; line-height: 1.1; }
+        .tile-bank { background-color: #15803d; color: #ecfdf5 !important; border: 3px solid #fcd34d; font-weight: bold; font-size: 0.65rem; line-height: 1.1; }
+        .tile-store { background-color: #9333ea; color: #f3e8ff !important; border: 3px solid #fcd34d; font-weight: bold; font-size: 0.65rem; line-height: 1.1; }
+        .tile-street-segment { background-color: #d1d5db; color: #4b5563; }
+        .cash-drop-indicator {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            background-color: #fef3c7;
+            color: #b45309;
+            font-size: 0.6rem;
+            padding: 1px 3px;
+            border-radius: 4px;
+            font-weight: bold;
+            z-index: 5;
+            border: 1px solid #d97706;
+            line-height: 1;
+        }
+        .property-info {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            font-weight: bold;
+        }
+        .property-info .house-icon {
+            font-size: 1.1rem; /* Adjust size of house icon */
+            margin-bottom: 2px; /* Space between icon and level */
+        }
+        .property-info .level-text {
+            font-size: 0.8rem; /* Adjust size of level text */
+            color: #4b5563; /* Default text color for level */
+        }
+
+
+        .game-log { max-height: 20rem; overflow-y: auto; }
+        .game-log::-webkit-scrollbar { width: 8px; }
+        .game-log::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
+        .game-log::-webkit-scrollbar-track { background: #e2e8f0; }
+        .dialog-backdrop { z-index: 50; background-color: rgba(0, 0, 0, 0.7); }
+    </style>
+</head>
+<body class="p-4 md:p-8 min-h-screen">
+
+    <!-- Setup Screen (Modified for AI) --><div id="setup-overlay" class="fixed inset-0 flex items-center justify-center dialog-backdrop">
+        <div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-md">
+            <h2 class="text-2xl font-bold mb-4 text-gray-800">Start New Game</h2>
+            <p class="mb-6 text-gray-600">Choose human and AI players (Total 2-4 players). All players start in the City Center.</p>
+            
+            <div class="space-y-4 mb-6">
+                <div>
+                    <label for="human-players" class="block text-sm font-medium text-gray-700">Human Players</label>
+                    <select id="human-players" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
+                        <option value="1" selected>1 Player</option>
+                        <option value="2">2 Players</option>
+                        <option value="3">3 Players</option>
+                        <option value="4">4 Players</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="ai-players" class="block text-sm font-medium text-gray-700">AI Players</label>
+                    <select id="ai-players" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
+                        <option value="0">0 AI</option>
+                        <option value="1" selected>1 AI</option>
+                        <option value="2">2 AI</option>
+                        <option value="3">3 AI</option>
+                    </select>
+                </div>
+            </div>
+            
+            <p id="setup-error" class="text-red-600 text-sm mb-4 hidden"></p>
+
+            <div class="flex justify-end">
+                <button onclick="startGame()" class="px-6 py-3 text-lg bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl shadow-md transition duration-150">Start Game</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Game UI --><div id="game-container" class="hidden max-w-7xl mx-auto">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6 flex justify-between items-center">
+            The Capital Game <span id="game-mode-indicator" class="text-sm font-normal text-gray-500 bg-white p-2 rounded-lg shadow-sm">vs AI Mode</span>
+        </h1>
+
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
+            <!-- Player Stats Column (Span 3) --><div class="lg:col-span-3">
+                <!-- Board and Controls --><div class="bg-white p-6 rounded-xl shadow-2xl mb-8">
+                    <div id="controls" class="flex flex-col md:flex-row justify-between items-center mb-6 p-4 border-b pb-4 space-y-4 md:space-y-0">
+                        <div id="turn-indicator" class="text-xl font-semibold"></div>
+
+                        <div id="move-controls" class="flex flex-col items-center space-y-3">
+                            <div class="flex flex-col items-center space-y-2">
+                                <div class="text-sm font-medium text-gray-600">Choose Direction:</div>
+                                 <div id="directional-controls" class="grid grid-cols-3 gap-1 bg-gray-100 p-2 rounded-lg shadow-inner">
+                                     <!-- Dynamic radio buttons inserted here --></div>
+                            </div>
+                            
+                            <div class="flex space-x-2">
+                                <button id="roll-move-btn" onclick="rollAndMove()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition duration-150 active:scale-95 disabled:opacity-50" disabled>Roll & Move</button>
+                                <button id="dice-modifier-btn" onclick="toggleDiceModifier()" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition duration-150 active:scale-95 disabled:opacity-50 hidden" disabled>Use Dice Mod</button>
+                            </div>
+                            <div id="last-roll" class="text-sm font-bold text-gray-500 mt-1"></div>
+                        </div>
+
+                        <div id="action-buttons" class="flex flex-col space-y-2">
+                            <button id="buy-property-btn" onclick="buyProperty()" class="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition duration-150 active:scale-95 disabled:opacity-50" disabled>Buy/Enhance</button>
+                            <button id="special-action-btn" onclick="handleSpecialAction()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition duration-150 active:scale-95 disabled:opacity-50 hidden"></button>
+                            <button id="next-turn-btn" onclick="nextTurn()" class="bg-gray-400 hover:bg-gray-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition duration-150 active:scale-95 disabled:opacity-50" disabled>Next Turn</button>
+                        </div>
+                    </div>
+
+                    <!-- Game Board (9x13 Grid) --><div id="board" class="grid w-full mx-auto border border-gray-300 rounded-lg overflow-hidden">
+                        <!-- Tiles will be dynamically inserted here --></div>
+                </div>
+
+                <!-- Player Information Cards --><div id="player-cards-container" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <!-- Player cards will be dynamically inserted here --></div>
+            </div>
+
+            <!-- Game Log Column (Span 1) --><div class="lg:col-span-1">
+                <div class="bg-white p-6 rounded-xl shadow-lg">
+                    <h2 class="text-xl font-semibold text-gray-800 mb-4">Bank & Game Log</h2>
+                    <div id="bank-info" class="mb-4 p-3 bg-yellow-50 rounded-lg border border-yellow-200 text-gray-700 font-medium">
+                        Bank Funds: $<span id="bank-money">0</span>
+                    </div>
+                    <div id="game-log" class="game-log text-sm space-y-2">
+                        <!-- Log messages will be inserted here --></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generic Modal for Messages and Input --><div id="generic-modal" class="hidden fixed inset-0 flex items-center justify-center dialog-backdrop">
+        <div id="modal-content" class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-md">
+            <h3 id="modal-title" class="text-xl font-bold mb-4 text-gray-800">Title</h3>
+            <p id="modal-message" class="mb-6 text-gray-600">Message.</p>
+            <div id="modal-custom-content" class="mb-6"></div> <!-- Custom content area for teleportation/bank --><div id="modal-input-container" class="mb-4 hidden">
+                 <input type="number" id="modal-input" class="w-full p-2 border rounded-lg focus:ring-blue-500 focus:border-blue-500" placeholder="Enter amount">
+            </div>
+            <div id="modal-button-container" class="flex justify-end space-x-2">
+                <button id="modal-cancel-btn" onclick="closeModal()" class="px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 transition">Cancel</button>
+                <button id="modal-confirm-btn" onclick="closeModal()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition hidden">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+    // --- GLOBAL VARIABLES & CONFIGURATION ---
+    const GRID_ROWS = 9;
+    const GRID_COLS = 13;
+    const TOTAL_TILES = GRID_ROWS * GRID_COLS; // 117
+
+    const DICE_SIDES = 6;
+    const START_MONEY = 20; 
+
+    const BUY_COST_LEVEL_1 = 5;
+    const RENT_LEVEL_1 = 1;
+    const ENHANCE_COST_LEVEL_2 = 10;
+    const RENT_LEVEL_2 = 2;
+    const COST_DIAGONAL = 20;
+    const COST_MODIFIER = 20;
+    const BANK_LOAN_AMOUNT = 20; // Fixed loan amount
+
+    // Center Definition for 9x13 grid
+    const CENTER_ROW = 4; // (9 / 2)
+    const CENTER_COL = 6; // (13 / 2)
+    const CENTER_INDEX = CENTER_ROW * GRID_COLS + CENTER_COL; // 4 * 13 + 6 = 58 (City Center)
+
+    // Special Tile Definitions
+    const BANK_TILES = [0, TOTAL_TILES - 1]; 
+    const STORE_TILES = [GRID_COLS - 1, (GRID_ROWS - 1) * GRID_COLS]; 
+
+    const SUBWAY_TILES = [
+        CENTER_COL, 
+        (GRID_ROWS - 1) * GRID_COLS + CENTER_COL, 
+        CENTER_ROW * GRID_COLS, 
+        CENTER_ROW * GRID_COLS + (GRID_COLS - 1) 
+    ];
+    
+    const MAJOR_DESTINATIONS = [...SUBWAY_TILES, CENTER_INDEX]; 
+
+    // --- CITY CENTER ACTION CARDS (Cash Drop) ---
+    const ACTION_CARDS = [
+        { totalCash: 5, numTiles: 3, description: "Small Drop: $5 dropped across 3 random property tiles." },
+        { totalCash: 10, numTiles: 3, description: "Medium Drop: $10 dropped across 3 random property tiles." },
+        { totalCash: 20, numTiles: 5, description: "Large Drop: $20 dropped across 5 random property tiles." }
+    ];
+    // --- END ACTION CARDS ---
+
+    const PLAYER_COLORS = [
+        { id: 1, name: 'Red', hex: '#ef4444', text: 'text-red-600', bg: 'bg-red-500' },
+        { id: 2, name: 'Blue', hex: '#3b82f6', text: 'text-blue-600', bg: 'bg-blue-500' },
+        { id: 3, name: 'Green', hex: '#10b981', text: 'text-green-600', bg: 'bg-green-500' },
+        { id: 4, name: 'Yellow', hex: '#f59e0b', text: 'text-yellow-600', bg: 'bg-yellow-500' }
+    ];
+    
+    // NEW: Token positioning for multiple players on a single tile
+    const TOKEN_POSITIONS = [
+        { bottom: '1px', right: '1px', z: 10 },   // Bottom-right (1)
+        { top: '1px', right: '1px', z: 10 },      // Top-right (2)
+        { bottom: '1px', left: '1px', z: 10 },    // Bottom-left (3)
+        { top: '1px', left: '1px', z: 10 }        // Top-left (4)
+    ];
+
+
+    const MOVE_DIRECTIONS = {
+        'up': { dr: -1, dc: 0, symbol: '&uarr;' },
+        'down': { dr: 1, dc: 0, symbol: '&darr;' },
+        'left': { dr: 0, dc: -1, symbol: '&larr;' },
+        'right': { dr: 0, dc: 1, symbol: '&rarr;' },
+        'up-left': { dr: -1, dc: -1, symbol: '&#x2196;' },
+        'up-right': { dr: -1, dc: 1, symbol: '&#x2197;' },
+        'down-left': { dr: 1, dc: -1, symbol: '&#x2199;' },
+        'down-right': { dr: 1, dc: 1, symbol: '&#x2198;' }
+    };
+
+    let gameState = null;
+    let hasRolled = false;
+    let rollResult = 0;
+    let modifierActive = false;
+    let aiTurnInProgress = false; // NEW: Flag to prevent human interaction during AI turn
+
+    const elements = {
+        setupOverlay: document.getElementById('setup-overlay'),
+        setupError: document.getElementById('setup-error'),
+        humanPlayersSelect: document.getElementById('human-players'),
+        aiPlayersSelect: document.getElementById('ai-players'),
+        gameContainer: document.getElementById('game-container'),
+        turnIndicator: document.getElementById('turn-indicator'),
+        rollMoveBtn: document.getElementById('roll-move-btn'),
+        diceModifierBtn: document.getElementById('dice-modifier-btn'),
+        lastRoll: document.getElementById('last-roll'),
+        buyPropertyBtn: document.getElementById('buy-property-btn'),
+        specialActionBtn: document.getElementById('special-action-btn'),
+        nextTurnBtn: document.getElementById('next-turn-btn'),
+        board: document.getElementById('board'),
+        playerCardsContainer: document.getElementById('player-cards-container'),
+        bankMoney: document.getElementById('bank-money'),
+        gameLog: document.getElementById('game-log'),
+        directionalControls: document.getElementById('directional-controls'),
+        modal: document.getElementById('generic-modal'),
+        modalTitle: document.getElementById('modal-title'),
+        modalMessage: document.getElementById('modal-message'),
+        modalCustomContent: document.getElementById('modal-custom-content'), 
+        modalInputContainer: document.getElementById('modal-input-container'),
+        modalInput: document.getElementById('modal-input'),
+        modalCancelBtn: document.getElementById('modal-cancel-btn'),
+        modalConfirmBtn: document.getElementById('modal-confirm-btn'),
+    };
+
+    // --- UTILITIES ---
+    
+    /** AI Utility: delay for 'thinking' */
+    const delay = (ms) => new Promise(res => setTimeout(res, ms));
+
+    // NEW: Robust closeModal function for consistent UI reset and bug avoidance
+    window.closeModal = () => {
+        elements.modal.classList.add('hidden');
+        
+        // Reset modal content/input
+        elements.modalCustomContent.innerHTML = '';
+        elements.modalCustomContent.classList.add('hidden');
+        elements.modalInputContainer.classList.add('hidden');
+        elements.modalInput.value = '';
+        
+        // Reset buttons to default state and label
+        elements.modalConfirmBtn.classList.add('hidden');
+        elements.modalCancelBtn.classList.remove('hidden');
+        elements.modalCancelBtn.textContent = 'Cancel'; 
+        elements.modalCancelBtn.onclick = closeModal; // Ensure default close action is restored
+    };
+
+
+    const showModal = (title, message, isInput = false, confirmCallback = null, customContentHtml = null) => {
+        // Always start with a clean state
+        closeModal(); 
+
+        elements.modalTitle.textContent = title;
+        elements.modalMessage.innerHTML = message;
+        
+        // Default Cancel Button Configuration
+        elements.modalCancelBtn.textContent = 'Close';
+        elements.modalCancelBtn.onclick = closeModal;
+
+        if (customContentHtml) {
+            elements.modalCustomContent.innerHTML = customContentHtml;
+            elements.modalCustomContent.classList.remove('hidden');
+        } 
+
+        if (isInput) {
+            elements.modalInputContainer.classList.remove('hidden');
+            elements.modalCancelBtn.textContent = 'Cancel'; 
+        } 
+
+        if (confirmCallback) {
+            elements.modalConfirmBtn.classList.remove('hidden');
+            elements.modalConfirmBtn.textContent = 'Confirm'; 
+            elements.modalConfirmBtn.onclick = () => {
+                // Confirm action runs callback and then closes the modal
+                confirmCallback(isInput ? parseFloat(elements.modalInput.value) : null);
+                closeModal();
+            };
+        }
+
+        elements.modal.classList.remove('hidden');
+    };
+
+    const rollDie = () => {
+        return Math.floor(Math.random() * DICE_SIDES) + 1;
+    };
+
+    const getGridCoords = (index) => {
+        const row = Math.floor(index / GRID_COLS);
+        const col = index % GRID_COLS;
+        return { row, col };
+    };
+
+    const getIndexFromCoords = (row, col) => {
+        if (row < 0 || row >= GRID_ROWS || col < 0 || col >= GRID_COLS) {
+            return -1;
+        }
+        return row * GRID_COLS + col;
+    };
+
+    // --- GAME SETUP AND START ---
+
+    const initializeGame = (humanCount, aiCount) => {
+        const playerCount = humanCount + aiCount;
+        const initialBankMoney = playerCount * START_MONEY;
+        
+        const initialBoard = Array.from({ length: TOTAL_TILES }, (_, i) => {
+            const { row, col } = getGridCoords(i);
+            let type = 'property';
+            let isStreetAxis = (col === CENTER_COL || row === CENTER_ROW);
+
+            if (i === CENTER_INDEX) {
+                 type = 'city_center'; 
+            } else if (BANK_TILES.includes(i)) {
+                type = 'bank';
+            } else if (STORE_TILES.includes(i)) {
+                type = 'store';
+            } else if (SUBWAY_TILES.includes(i)) {
+                type = 'subway';
+            } else if (isStreetAxis) {
+                type = 'street_segment';
+            }
+
+            return {
+                id: i,
+                owner: 0,
+                level: 0,
+                fee: 0,
+                cashDrop: 0, 
+                type,
+            };
+        });
+
+        const activePlayerTemplates = PLAYER_COLORS.slice(0, playerCount);
+
+        const initialPlayers = activePlayerTemplates.map((p, index) => ({
+            id: p.id,
+            // NEW: Differentiate Human and AI names
+            name: (index < humanCount) ? `P${index + 1} (${p.name})` : `AI ${index + 1 - humanCount} (${p.name})`,
+            isAI: (index >= humanCount), // NEW: AI flag
+            money: START_MONEY,
+            position: CENTER_INDEX, // NEW: Start all players at the City Center
+            color: p.hex,
+            isBankrupt: false,
+            debt: 0,
+            debtRounds: 0, 
+            isGraceRound: false, 
+            hasDiagonalMove: false,
+            hasDiceModifier: false,
+        }));
+
+        gameState = {
+            players: initialPlayers,
+            bankMoney: initialBankMoney, 
+            board: initialBoard,
+            currentPlayerIndex: 0,
+            isGameRunning: true,
+            setupPhase: 'playing', // NEW: Start directly in playing phase
+            gameLog: [{ time: Date.now(), message: `Game started with ${humanCount} human(s) and ${aiCount} AI(s). All players start at the City Center.` }]
+        };
+
+        hasRolled = false;
+        rollResult = 0;
+        modifierActive = false;
+    };
+
+    // MODIFIED: Reads from select inputs
+    window.startGame = () => {
+        const humanCount = parseInt(elements.humanPlayersSelect.value);
+        const aiCount = parseInt(elements.aiPlayersSelect.value);
+        const playerCount = humanCount + aiCount;
+
+        if (playerCount < 2 || playerCount > 4) {
+            elements.setupError.textContent = 'Total players must be between 2 and 4.';
+            elements.setupError.classList.remove('hidden');
+            return;
+        }
+
+        initializeGame(humanCount, aiCount);
+        elements.setupOverlay.classList.add('hidden');
+        elements.gameContainer.classList.remove('hidden');
+        syncGameState();
+    };
+
+    /** Centralized function to declare a player bankrupt and handle property/game state cleanup. */
+    const declareBankrupt = (player, reason) => {
+        if (player.isBankrupt) return; 
+
+        player.isBankrupt = true;
+        player.money = 0;
+        player.debt = 0;
+        player.debtRounds = 0;
+        player.isGraceRound = false;
+
+        // Return properties to the Bank
+        gameState.board.forEach(t => {
+            if (t.owner === player.id) {
+                t.owner = 0;
+                t.level = 0;
+                t.fee = 0;
+            }
+        });
+
+        gameState.gameLog.push({ time: Date.now(), message: `🛑 ${player.name} is bankrupt! (${reason}) All properties returned to the Bank.` });
+
+        // Check game over
+        const activePlayers = gameState.players.filter(p => !p.isBankrupt);
+        gameState.isGameRunning = activePlayers.length > 1;
+        
+        if (!gameState.isGameRunning) {
+             const winner = activePlayers[0];
+             if (winner) {
+                showModal("Game Over!", `${winner.name} won The Capital Game!`);
+                // Disable all game controls
+                aiTurnInProgress = true; // Use this flag to lock controls
+                syncGameState(); // Final sync
+             }
+        }
+    };
+
+
+    // --- CORE GAME LOGIC ---
+
+    /** Distributes the total cash amount across a random number of unowned, non-bank/subway/store property tiles. */
+    const distributeCash = (totalCash, numTiles) => {
+        const eligibleTiles = gameState.board.filter(t => 
+            t.type === 'property' && t.id !== CENTER_INDEX
+        );
+
+        if (eligibleTiles.length === 0) return;
+
+        const selectedTiles = [];
+        for (let i = 0; i < numTiles && eligibleTiles.length > 0; i++) {
+            const randomIndex = Math.floor(Math.random() * eligibleTiles.length);
+            selectedTiles.push(eligibleTiles.splice(randomIndex, 1)[0]);
+        }
+        
+        let cashPerTile = Math.floor(totalCash / selectedTiles.length);
+        let remainder = totalCash - (cashPerTile * selectedTiles.length);
+
+        selectedTiles.forEach((tile, index) => {
+            let amount = cashPerTile;
+            if (index === 0) amount += remainder; 
+            
+            const boardTile = gameState.board.find(t => t.id === tile.id);
+            if (boardTile) {
+                boardTile.cashDrop += amount;
+            }
+        });
+
+        const tileIds = selectedTiles.map(t => t.id).join(', ');
+        return `Cash dropped: $${totalCash} distributed to tiles ${tileIds}.`;
+    };
+
+    /** Executes one of the three random action cards when landing on the City Center. */
+    const activateActionCard = (player) => {
+        const card = ACTION_CARDS[Math.floor(Math.random() * ACTION_CARDS.length)];
+        let logMessage = `${player.name} landed on the **City Center**! They drew the card: **${card.description}**`;
+
+        const dropMessage = distributeCash(card.totalCash, card.numTiles);
+        logMessage += ` (Effect: ${dropMessage})`;
+        
+        gameState.gameLog.push({ time: Date.now(), message: logMessage });
+    };
+    
+    /** (HUMAN) Handles the choice of teleporting to another subway station via modal. */
+    const teleportToSubway = (player, currentTileIndex) => {
+        const otherDestinations = MAJOR_DESTINATIONS.filter(index => index !== currentTileIndex);
+
+        const choices = otherDestinations.map(index => {
+            let name = `Tile ${index}`;
+            if (index === CENTER_INDEX) name = 'City Center (Action)';
+            else if (SUBWAY_TILES.includes(index)) name = `Subway (Tile ${index})`;
+            return { index, name };
+        });
+
+        let choiceHtml = '<p class="mb-4 text-gray-700 font-semibold">Choose your destination:</p>';
+        choiceHtml += '<div class="flex flex-col space-y-2">';
+        choices.forEach(c => {
+            choiceHtml += `<button data-destination="${c.index}" class="teleport-option px-4 py-2 bg-gray-100 hover:bg-blue-600 hover:text-white rounded-lg text-left font-semibold transition">${c.name}</button>`;
+        });
+        choiceHtml += '</div>';
+
+        // Use the modal to present the choice
+        showModal(
+            `${player.name}: Subway Teleport`,
+            `You landed on a Subway station (Tile ${currentTileIndex}). Teleport to any other major destination (Subway or City Center) to proceed to the next turn.`,
+            false,
+            null, 
+            choiceHtml
+        );
+        
+        // Hide standard buttons for custom action buttons
+        elements.modalCancelBtn.classList.add('hidden');
+        elements.modalConfirmBtn.classList.add('hidden');
+        
+        // Add listeners to the new buttons
+        document.querySelectorAll('.teleport-option').forEach(button => {
+            button.onclick = (e) => {
+                const destination = parseInt(e.target.dataset.destination);
+                
+                player.position = destination;
+                
+                const destinationTile = gameState.board[destination];
+                if (destinationTile.cashDrop > 0) {
+                      const amount = destinationTile.cashDrop;
+                      player.money = parseFloat((player.money + amount).toFixed(2));
+                      gameState.gameLog.push({ time: Date.now(), message: `${player.name} collected **$${amount.toFixed(2)}** in cash from the destination tile!` });
+                      destinationTile.cashDrop = 0;
+                }
+
+                gameState.gameLog.push({ time: Date.now(), message: `${player.name} teleported from Tile ${currentTileIndex} to Tile ${destination} (${choices.find(c => c.index === destination).name}).` });
+
+                if (destination === CENTER_INDEX) {
+                    gameState.gameLog.push({ time: Date.now(), message: `...Triggering City Center Action Card.` });
+                    activateActionCard(player);
+                }
+
+                closeModal();
+                nextTurn(); 
+            };
+        });
+    };
+
+    /** (AI) Logic for choosing a teleport destination. */
+    const aiTeleport = async (player, currentTileIndex) => {
+        const otherDestinations = MAJOR_DESTINATIONS.filter(index => index !== currentTileIndex);
+        
+        // AI Strategy: Simple random choice
+        const destination = otherDestinations[Math.floor(Math.random() * otherDestinations.length)];
+        
+        gameState.gameLog.push({ time: Date.now(), message: `AI ${player.name} is teleporting...` });
+        syncGameState();
+        await delay(1000);
+
+        player.position = destination;
+        
+        const destinationTile = gameState.board[destination];
+        if (destinationTile.cashDrop > 0) {
+            const amount = destinationTile.cashDrop;
+            player.money = parseFloat((player.money + amount).toFixed(2));
+            gameState.gameLog.push({ time: Date.now(), message: `AI ${player.name} collected **$${amount.toFixed(2)}** in cash from the destination tile!` });
+            destinationTile.cashDrop = 0;
+        }
+        
+        let destName = `Tile ${destination}`;
+        if (destination === CENTER_INDEX) destName = "City Center";
+
+        gameState.gameLog.push({ time: Date.now(), message: `AI ${player.name} teleported from Tile ${currentTileIndex} to ${destName}.` });
+
+        if (destination === CENTER_INDEX) {
+            gameState.gameLog.push({ time: Date.now(), message: `...AI triggering City Center Action Card.` });
+            activateActionCard(player);
+        }
+
+        syncGameState(); // Show the move
+        await delay(1000);
+
+        endAITurn(); // FIX: End the AI turn correctly
+    };
+
+
+    /** Calculates the new position based on direction and steps, respecting grid boundaries. */
+    const calculateNewPosition = (currentPos, direction, steps) => {
+        let { row, col } = getGridCoords(currentPos);
+        let current1DIndex = currentPos;
+
+        const vector = MOVE_DIRECTIONS[direction];
+        if (!vector) return { newPos: currentPos, stepsTaken: 0 };
+
+        let stepsTaken = 0;
+        for (let i = 0; i < steps; i++) {
+            let newRow = row + vector.dr;
+            let newCol = col + vector.dc;
+
+            if (newRow < 0 || newRow >= GRID_ROWS || newCol < 0 || newCol >= GRID_COLS) {
+                break;
+            }
+
+            row = newRow;
+            col = newCol;
+            current1DIndex = getIndexFromCoords(row, col);
+            stepsTaken++;
+        }
+
+        return { newPos: current1DIndex, stepsTaken: stepsTaken };
+    };
+
+    window.rollAndMove = () => {
+        if (!gameState.isGameRunning || hasRolled || gameState.setupPhase !== 'playing' || aiTurnInProgress) return;
+
+        const player = gameState.players[gameState.currentPlayerIndex];
+        const direction = document.querySelector('input[name="direction"]:checked')?.value;
+
+        if (!direction) {
+            showModal("Move Error", "Please select a direction before rolling.");
+            return;
+        }
+
+        rollResult = rollDie();
+        let effectiveRoll = rollResult;
+        
+        elements.lastRoll.textContent = `Rolled a ${rollResult}. Move direction selected: ${direction}.`;
+
+        if (player.hasDiceModifier && !modifierActive) {
+            elements.diceModifierBtn.classList.remove('hidden');
+            elements.diceModifierBtn.disabled = false;
+            elements.rollMoveBtn.disabled = true;
+            return;
+        }
+
+        if (modifierActive) {
+            effectiveRoll = parseInt(elements.lastRoll.dataset.effectiveRoll);
+            player.hasDiceModifier = false; // Consume the modifier
+            modifierActive = false;
+        }
+        
+        const { newPos, stepsTaken } = calculateNewPosition(player.position, direction, effectiveRoll);
+        player.position = newPos;
+
+        hasRolled = true; 
+        rollResult = 0;
+
+        handleLanding(player, newPos);
+
+        gameState.gameLog.push({ time: Date.now(), message: `${player.name} chose ${direction}, rolled ${effectiveRoll} (Base: ${rollResult}), and moved ${stepsTaken} steps to Tile ${newPos}.` });
+        syncGameState();
+    };
+
+    window.toggleDiceModifier = () => {
+        if (!gameState.isGameRunning || hasRolled || gameState.setupPhase !== 'playing' || !rollResult || aiTurnInProgress) return;
+
+        const player = gameState.players[gameState.currentPlayerIndex];
+        
+        let newRoll;
+        let modifierText;
+
+        // Simple +1 / -1 logic
+        if (!modifierActive) {
+             if (rollResult + 1 <= DICE_SIDES + 1) { // Allow 7
+                newRoll = rollResult + 1;
+                modifierText = ` (+1)`;
+             } else if (rollResult - 1 >= 1) { // Allow 1
+                newRoll = rollResult - 1;
+                modifierText = ` (-1)`;
+             } else {
+                 newRoll = rollResult; // e.g. rolled 1, can't subtract
+                 modifierText = ` (No change)`;
+             }
+        }
+        
+        elements.lastRoll.textContent = `Rolled ${rollResult}. Modified Roll: ${newRoll}${modifierText}.`;
+        elements.lastRoll.dataset.effectiveRoll = newRoll;
+        modifierActive = true;
+        
+        elements.rollMoveBtn.disabled = false;
+        elements.rollMoveBtn.textContent = 'Move';
+        elements.diceModifierBtn.classList.add('hidden');
+        
+        // This is a bit of a hack, but it forces the move.
+        // The user has "confirmed" the modifier by clicking the button.
+        // We call rollAndMove, which will now use the 'modifierActive' flag.
+        window.rollAndMove(); 
+    };
+    
+    /** Checks if the player has any mandatory or elective action to perform on the tile. */
+    const checkAutoNextTurn = (player, tile) => {
+        if (!hasRolled) return false;
+
+        if (player.isBankrupt) return true;
+
+        if (tile.type === 'bank' || tile.type === 'store' || tile.type === 'subway' || tile.type === 'city_center') {
+            return false;
+        }
+
+        if (tile.type === 'property') {
+            if (tile.owner !== 0 && tile.owner !== player.id) {
+                return true;
+            }
+            if (tile.owner === 0) {
+                if (player.money < BUY_COST_LEVEL_1) {
+                    gameState.gameLog.push({ time: Date.now(), message: `${player.name} cannot afford to buy Tile ${tile.id}. Turn auto-advances.` });
+                    return true;
+                }
+                return false; 
+            }
+            if (tile.owner === player.id) {
+                if (tile.level === 2) {
+                    return true;
+                }
+                if (tile.level === 1 && player.money < ENHANCE_COST_LEVEL_2) {
+                    gameState.gameLog.push({ time: Date.now(), message: `${player.name} cannot afford to enhance Tile ${tile.id}. Turn auto-advances.` });
+                    return true;
+                }
+                return false;
+            }
+        }
+        
+        if (tile.type === 'street_segment') {
+            return true;
+        }
+
+        return false;
+    };
+
+
+    const handleLanding = (player, newPos) => {
+        const tile = gameState.board[newPos];
+        let logMessage = '';
+
+        if (tile.cashDrop > 0) {
+            player.money = parseFloat((player.money + tile.cashDrop).toFixed(2));
+            logMessage += `${player.name} collected **$${tile.cashDrop.toFixed(2)}** in cash from the tile! `;
+            tile.cashDrop = 0; 
+        }
+
+        if (newPos === CENTER_INDEX) {
+             logMessage += `${player.name} landed on the **City Center (Park)**! Drawing an Action Card...`;
+             gameState.gameLog.push({ time: Date.now(), message: logMessage });
+             activateActionCard(player);
+        } 
+        
+        else if (tile.type === 'subway') {
+             logMessage += `${player.name} landed on a Subway (Tile ${newPos}). You will now choose a station to teleport to.`;
+             gameState.gameLog.push({ time: Date.now(), message: logMessage });
+             
+             // NEW: Divert logic for AI
+             if (player.isAI) {
+                 setTimeout(() => aiTeleport(player, newPos), 500);
+             } else {
+                 setTimeout(() => teleportToSubway(player, newPos), 10);
+             }
+             syncGameState();
+             return; // Turn will be ended by the teleport function
+        }
+        
+        else if (tile.type === 'bank') {
+             logMessage += `${player.name} landed on the Bank. You can borrow or repay debt.`;
+        } else if (tile.type === 'store') {
+             logMessage += `${player.name} landed on the Store. You can buy upgrades.`;
+        } else if (tile.type === 'street_segment') {
+             logMessage += `${player.name} landed on a neutral segment (Tile ${newPos}).`;
+        } else if (tile.owner !== 0 && tile.owner !== player.id) {
+            // Refactored rent payment to a separate function
+            payRent(player, tile);
+        } else if (tile.owner === 0) {
+            logMessage += `${player.name} landed on unowned property Tile ${newPos}. You can buy it for $${BUY_COST_LEVEL_1}.`;
+        } else if (tile.owner === player.id) {
+            if (tile.level === 1) {
+                logMessage += `${player.name} landed on their own property (Tile ${newPos}). You can enhance to Level 2 for $${ENHANCE_COST_LEVEL_2}.`;
+            } else {
+                logMessage += `${player.name} landed on their own fully-enhanced property (Tile ${newPos}).`;
+            }
+        }
+        
+        if (logMessage) {
+            gameState.gameLog.push({ time: Date.now(), message: logMessage });
+        }
+    };
+
+    /** Handles rent payment and potential debt/bankruptcy. */
+    const payRent = (player, tile) => {
+        const owner = gameState.players.find(p => p.id === tile.owner);
+        const rent = tile.fee;
+        let logMessage = "";
+
+        if (owner && !owner.isBankrupt) {
+            if (player.money >= rent) {
+                player.money = parseFloat((player.money - rent).toFixed(2));
+                owner.money = parseFloat((owner.money + rent).toFixed(2));
+                logMessage = `${player.name} landed on Tile ${tile.id} (Level ${tile.level}) owned by ${owner.name} and paid **$${rent.toFixed(2)}** in rent.`;
+            } else {
+                // Handle partial payment and debt
+                const partialPayment = player.money;
+                owner.money = parseFloat((owner.money + partialPayment).toFixed(2));
+                player.money = 0;
+                const remainingRent = rent - partialPayment;
+                
+                handleDebt(player, remainingRent, `Failure to pay $${rent.toFixed(2)} rent to ${owner.name}`);
+                logMessage = `${player.name} landed on ${owner.name}'s property and could not afford the **$${rent.toFixed(2)}** rent. Paid $${partialPayment.toFixed(2)} and now owes **$${remainingRent.toFixed(2)}** to the Bank.`;
+            }
+        } else {
+            logMessage = `${player.name} landed on Tile ${tile.id}, but the owner (${owner?.name || 'Unknown'}) is bankrupt. No rent paid.`;
+        }
+        gameState.gameLog.push({ time: Date.now(), message: logMessage });
+    };
+
+
+    const handleDebt = (player, amount, reason) => {
+        player.debt += amount;
+        player.debtRounds = 0; // Reset debt rounds
+        player.isGraceRound = true; // Give one round to pay
+        gameState.gameLog.push({ time: Date.now(), message: `DEBT: ${player.name} incurred $${amount.toFixed(2)} in debt. (${reason})` });
+    };
+
+    const checkDebt = (player) => {
+        if (player.debt <= 0) return;
+
+        if (player.isGraceRound) {
+            player.isGraceRound = false; 
+            gameState.gameLog.push({ time: Date.now(), message: `DEBT: ${player.name} has a grace period. Debt of $${player.debt.toFixed(2)} is due next turn.` });
+            return;
+        }
+
+        player.debtRounds++;
+        gameState.gameLog.push({ time: Date.now(), message: `DEBT: ${player.name} has $${player.debt.toFixed(2)} in debt. (Round ${player.debtRounds}/3)` });
+
+        if (player.debtRounds >= 3) {
+            declareBankrupt(player, `Failed to pay $${player.debt.toFixed(2)} debt for 3 rounds`);
+        }
+    };
+
+
+    window.buyProperty = () => {
+        // This function is now used by both Human and AI
+        // It relies on the global gameState.currentPlayerIndex
+        if (!gameState.isGameRunning) return;
+        
+        const player = gameState.players[gameState.currentPlayerIndex];
+        const tile = gameState.board[player.position];
+
+        if (tile.type !== 'property') return;
+
+        if (tile.owner === 0 && player.money >= BUY_COST_LEVEL_1) {
+            player.money = parseFloat((player.money - BUY_COST_LEVEL_1).toFixed(2));
+            tile.owner = player.id;
+            tile.level = 1;
+            tile.fee = RENT_LEVEL_1;
+            gameState.gameLog.push({ time: Date.now(), message: `${player.name} bought Tile ${tile.id} (Level 1) for $${BUY_COST_LEVEL_1}.` });
+        } else if (tile.owner === player.id && tile.level === 1 && player.money >= ENHANCE_COST_LEVEL_2) {
+            player.money = parseFloat((player.money - ENHANCE_COST_LEVEL_2).toFixed(2));
+            tile.level = 2;
+            tile.fee = RENT_LEVEL_2;
+            gameState.gameLog.push({ time: Date.now(), message: `${player.name} enhanced Tile ${tile.id} to Level 2 for $${ENHANCE_COST_LEVEL_2}.` });
+        } else {
+             gameState.gameLog.push({ time: Date.now(), message: `Action failed: Cannot buy/enhance Tile ${tile.id}.` });
+        }
+        
+        // After buying, the turn is not over, but the buy action is done.
+        // We sync state, and the player must click "Next Turn".
+        syncGameState();
+    };
+
+
+    // --- REFACTORED BANK & STORE LOGIC (for AI compatibility) ---
+
+    /** Core logic for borrowing money */
+    const borrowMoney = (player, amount) => {
+        if (amount <= 0 || isNaN(amount)) {
+            if (!player.isAI) showModal("Bank Error", "Invalid loan amount.");
+            return;
+        }
+        if (player.debt > 0) {
+            if (!player.isAI) showModal("Bank Error", "You must repay your existing debt before borrowing more.");
+            return;
+        }
+        
+        amount = BANK_LOAN_AMOUNT; // Force fixed loan amount
+        player.debt += amount;
+        player.money = parseFloat((player.money + amount).toFixed(2));
+        gameState.bankMoney = parseFloat((gameState.bankMoney - amount).toFixed(2));
+        player.debtRounds = 0; // Reset debt rounds
+        player.isGraceRound = true; // Give a grace round
+        gameState.gameLog.push({ time: Date.now(), message: `${player.name} borrowed **$${amount.toFixed(2)}** from the Bank. Debt is now $${player.debt.toFixed(2)}.` });
+        syncGameState();
+    };
+
+    /** Core logic for repaying debt */
+    const repayDebt = (player, amount) => {
+        if (amount <= 0 || isNaN(amount)) {
+            if (!player.isAI) showModal("Bank Error", "Invalid repayment amount.");
+            return;
+        }
+        if (amount > player.debt) {
+            if (!player.isAI) showModal("Bank Error", `You only owe $${player.debt.toFixed(2)}.`);
+            return;
+        }
+        if (amount > player.money) {
+            if (!player.isAI) showModal("Bank Error", "You do not have enough money to make this repayment.");
+            return;
+        }
+
+        player.money = parseFloat((player.money - amount).toFixed(2));
+        player.debt = parseFloat((player.debt - amount).toFixed(2));
+        gameState.bankMoney = parseFloat((gameState.bankMoney + amount).toFixed(2));
+        
+        let logMsg = `${player.name} repaid **$${amount.toFixed(2)}** to the Bank.`;
+        if (player.debt === 0) {
+            logMsg += " All debt cleared!";
+            player.debtRounds = 0;
+            player.isGraceRound = false;
+        } else {
+            logMsg += ` Remaining debt: $${player.debt.toFixed(2)}.`;
+        }
+        gameState.gameLog.push({ time: Date.now(), message: logMsg });
+        syncGameState();
+    };
+
+    /** Core logic for buying diagonal move */
+    const buyDiagonal = (player) => {
+        if (player.hasDiagonalMove) {
+            if (!player.isAI) showModal("Store Error", "You already have the Diagonal Move upgrade.");
+            return;
+        }
+        if (player.money < COST_DIAGONAL) {
+            if (!player.isAI) showModal("Store Error", "You cannot afford the Diagonal Move upgrade.");
+            return;
+        }
+        player.money = parseFloat((player.money - COST_DIAGONAL).toFixed(2));
+        player.hasDiagonalMove = true;
+        gameState.gameLog.push({ time: Date.now(), message: `${player.name} bought the **Diagonal Move** upgrade for $${COST_DIAGONAL}.` });
+        syncGameState();
+    };
+
+    /** Core logic for buying dice modifier */
+    const buyModifier = (player) => {
+        if (player.hasDiceModifier) {
+            if (!player.isAI) showModal("Store Error", "You already have a Dice Modifier.");
+            return;
+        }
+        if (player.money < COST_MODIFIER) {
+            if (!player.isAI) showModal("Store Error", "You cannot afford the Dice Modifier.");
+            return;
+        }
+        player.money = parseFloat((player.money - COST_MODIFIER).toFixed(2));
+        player.hasDiceModifier = true;
+        gameState.gameLog.push({ time: Date.now(), message: `${player.name} bought a **Dice Modifier** for $${COST_MODIFIER}.` });
+        syncGameState();
+    };
+
+
+    /** (HUMAN) Modal-driven function for Bank/Store */
+    window.handleSpecialAction = () => {
+        if (!gameState.isGameRunning || aiTurnInProgress) return;
+        
+        const player = gameState.players[gameState.currentPlayerIndex];
+        const tile = gameState.board[player.position];
+
+        // --- BANK MODAL ---
+        if (tile.type === 'bank') {
+            let bankHtml = `<p class="mb-4 text-gray-700">Current Debt: <strong class="text-red-600">$${player.debt.toFixed(2)}</strong></p>`;
+            bankHtml += '<div class="flex flex-col space-y-2">';
+            
+            // Borrow Button
+            if (player.debt > 0) {
+                bankHtml += `<button class="px-4 py-2 bg-gray-400 text-white rounded-lg cursor-not-allowed" disabled>Borrow $${BANK_LOAN_AMOUNT} (Repay debt first)</button>`;
+            } else {
+                bankHtml += `<button id="bank-borrow-btn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition">Borrow $${BANK_LOAN_AMOUNT} (Fixed)</button>`;
+            }
+            
+            // Repay Button
+            if (player.debt === 0) {
+                 bankHtml += `<button class="px-4 py-2 bg-gray-400 text-white rounded-lg cursor-not-allowed" disabled>Repay Debt (None)</button>`;
+            } else {
+                 bankHtml += `<button id="bank-repay-btn" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition">Repay Full Debt ($${player.debt.toFixed(2)})</button>`;
+            }
+            bankHtml += '</div>';
+
+            showModal(`${player.name} at the Bank`, "Choose an action.", false, null, bankHtml);
+
+            const borrowBtn = document.getElementById('bank-borrow-btn');
+            if (borrowBtn) {
+                borrowBtn.onclick = () => {
+                    borrowMoney(player, BANK_LOAN_AMOUNT);
+                    closeModal();
+                };
+            }
+            
+            const repayBtn = document.getElementById('bank-repay-btn');
+            if (repayBtn) {
+                repayBtn.onclick = () => {
+                    repayDebt(player, player.debt); // Only allow full repayment
+                    closeModal();
+                };
+            }
+            
+            // Hide default buttons
+            elements.modalCancelBtn.textContent = 'Done';
+            elements.modalConfirmBtn.classList.add('hidden');
+        }
+
+        // --- STORE MODAL ---
+        else if (tile.type === 'store') {
+            let storeHtml = '<div class="flex flex-col space-y-2">';
+            
+            // Buy Diagonal
+            if (player.hasDiagonalMove) {
+                storeHtml += `<button class="px-4 py-2 bg-gray-400 text-white rounded-lg cursor-not-allowed" disabled>Diagonal Move ($${COST_DIAGONAL}) - Already Owned</button>`;
+            } else {
+                storeHtml += `<button id="store-diagonal-btn" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition ${player.money < COST_DIAGONAL ? 'opacity-50 cursor-not-allowed' : ''}" ${player.money < COST_DIAGONAL ? 'disabled' : ''}>Buy Diagonal Move ($${COST_DIAGONAL})</button>`;
+            }
+
+            // Buy Modifier
+            if (player.hasDiceModifier) {
+                storeHtml += `<button class="px-4 py-2 bg-gray-400 text-white rounded-lg cursor-not-allowed" disabled>Dice Modifier ($${COST_MODIFIER}) - Already Owned</button>`;
+            } else {
+                storeHtml += `<button id="store-modifier-btn" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg transition ${player.money < COST_MODIFIER ? 'opacity-50 cursor-not-allowed' : ''}" ${player.money < COST_MODIFIER ? 'disabled' : ''}>Buy Dice Modifier ($${COST_MODIFIER})</button>`;
+            }
+            storeHtml += '</div>';
+            
+            showModal(`${player.name} at the Store`, "You can buy one item per visit.", false, null, storeHtml);
+
+            const diagonalBtn = document.getElementById('store-diagonal-btn');
+            if(diagonalBtn) {
+                diagonalBtn.onclick = () => {
+                    buyDiagonal(player);
+                    closeModal();
+                };
+            }
+            
+            const modifierBtn = document.getElementById('store-modifier-btn');
+            if(modifierBtn) {
+                modifierBtn.onclick = () => {
+                    buyModifier(player);
+                    closeModal();
+                };
+            }
+            
+            // Hide default buttons
+            elements.modalCancelBtn.textContent = 'Done';
+            elements.modalConfirmBtn.classList.add('hidden');
+        }
+    };
+
+
+    window.nextTurn = () => {
+        if (!gameState.isGameRunning || !hasRolled || aiTurnInProgress) return;
+
+        const player = gameState.players[gameState.currentPlayerIndex];
+        
+        // Handle debt at the *end* of the turn
+        if (!player.isBankrupt) {
+            checkDebt(player);
+        }
+
+        // Find the next non-bankrupt player
+        let nextPlayerIndex = gameState.currentPlayerIndex;
+        do {
+            nextPlayerIndex = (nextPlayerIndex + 1) % gameState.players.length;
+        } while (gameState.players[nextPlayerIndex].isBankrupt && nextPlayerIndex !== gameState.currentPlayerIndex);
+
+        // If we looped all the way around, it means only one player is left
+        if (nextPlayerIndex === gameState.currentPlayerIndex && gameState.players[nextPlayerIndex].isBankrupt) {
+            // This should be caught by declareBankrupt, but as a fallback:
+            gameState.isGameRunning = false;
+            showModal("Game Over", "All other players are bankrupt!");
+            syncGameState();
+            return;
+        }
+
+        gameState.currentPlayerIndex = nextPlayerIndex;
+        hasRolled = false;
+        rollResult = 0;
+        modifierActive = false;
+
+        syncGameState();
+    };
+
+    // --- AI LOGIC FUNCTIONS ---
+
+    /** (AI) Gets a list of valid move directions */
+    const getValidDirections = (position, hasDiagonal) => {
+        const { row, col } = getGridCoords(position);
+        const valid = [];
+        
+        for (const [dir, vec] of Object.entries(MOVE_DIRECTIONS)) {
+            const isDiagonal = vec.dr !== 0 && vec.dc !== 0;
+            if (isDiagonal && !hasDiagonal) continue;
+
+            const newRow = row + vec.dr;
+            const newCol = col + vec.dc;
+
+            if (newRow >= 0 && newRow < GRID_ROWS && newCol >= 0 && newCol < GRID_COLS) {
+                valid.push(dir);
+            }
+        }
+        return valid;
+    };
+
+    /** (AI) Chooses a direction to move */
+    const aiChooseDirection = (player) => {
+        const validDirections = getValidDirections(player.position, player.hasDiagonalMove);
+        if (validDirections.length === 0) return null;
+        
+        // Simple Strategy: Pick a random valid direction
+        return validDirections[Math.floor(Math.random() * validDirections.length)];
+    };
+
+    /** (AI) Decides bank actions */
+    const aiBankAction = async (player) => {
+        // Strategy: Always repay full debt if possible.
+        if (player.debt > 0 && player.money >= player.debt) {
+            gameState.gameLog.push({ time: Date.now(), message: `AI ${player.name} is repaying $${player.debt.toFixed(2)} of debt.` });
+            await delay(1000);
+            repayDebt(player, player.debt);
+        }
+        // Strategy: If low on cash and no debt, borrow.
+        else if (player.money < 10 && player.debt === 0) {
+            gameState.gameLog.push({ time: Date.now(), message: `AI ${player.name} is borrowing $${BANK_LOAN_AMOUNT}.` });
+            await delay(1000);
+            borrowMoney(player, BANK_LOAN_AMOUNT);
+        }
+    };
+
+    /** (AI) Decides store actions */
+    const aiStoreAction = async (player) => {
+        // Strategy: Prioritize Diagonal Move
+        if (!player.hasDiagonalMove && player.money >= COST_DIAGONAL) {
+            gameState.gameLog.push({ time: Date.now(), message: `AI ${player.name} is buying Diagonal Move.` });
+            await delay(1000);
+            buyDiagonal(player);
+        }
+        // Strategy: If diagonal is owned, buy modifier
+        else if (!player.hasDiceModifier && player.money >= COST_MODIFIER) {
+             gameState.gameLog.push({ time: Date.now(), message: `AI ${player.name} is buying Dice Modifier.` });
+             await delay(1000);
+             buyModifier(player);
+        }
+    };
+
+    /** (AI) Ends the AI's turn and passes control */
+    const endAITurn = () => {
+        if (!gameState.isGameRunning) {
+            aiTurnInProgress = false;
+            syncGameState(); // Sync to show game over
+            return;
+        }
+
+        const player = gameState.players[gameState.currentPlayerIndex];
+        
+        // Handle debt at the *end* of the turn
+        if (!player.isBankrupt) {
+            checkDebt(player);
+        }
+
+        // Find the next non-bankrupt player
+        let nextPlayerIndex = gameState.currentPlayerIndex;
+        do {
+            nextPlayerIndex = (nextPlayerIndex + 1) % gameState.players.length;
+        } while (gameState.players[nextPlayerIndex].isBankrupt && nextPlayerIndex !== gameState.currentPlayerIndex);
+
+        if (nextPlayerIndex === gameState.currentPlayerIndex && gameState.players[nextPlayerIndex].isBankrupt) {
+            gameState.isGameRunning = false;
+            aiTurnInProgress = false;
+            showModal("Game Over", "All other players are bankrupt!");
+            syncGameState();
+            return;
+        }
+
+        gameState.currentPlayerIndex = nextPlayerIndex;
+        hasRolled = false;
+        rollResult = 0;
+        modifierActive = false;
+        aiTurnInProgress = false; // Release the lock *before* syncing
+
+        syncGameState(); // This will trigger the next player's turn
+    };
+
+    /** (AI) The main "brain" function that runs an AI's turn */
+    const runAITurn = async (player) => {
+        if (!gameState.isGameRunning || player.isBankrupt || !player.isAI) {
+            aiTurnInProgress = false;
+            return;
+        }
+        
+        aiTurnInProgress = true;
+        
+        // --- 1. MOVEMENT PHASE ---
+        const direction = aiChooseDirection(player);
+        if (!direction) {
+            gameState.gameLog.push({ time: Date.now(), message: `AI ${player.name} is trapped and cannot move.` });
+            await delay(1000);
+            endAITurn(); // FIX: Call endAITurn
+            return;
+        }
+
+        rollResult = rollDie(); // Use global 'rollResult' for consistency
+        let effectiveRoll = rollResult;
+        let modifierUsed = false;
+
+        // AI simple modifier logic: always use it if it's +1
+        if (player.hasDiceModifier) {
+            effectiveRoll = rollResult + 1; // Simple logic: always add 1
+            if (effectiveRoll > (DICE_SIDES + 1)) effectiveRoll = rollResult - 1; // if 6+1=7, try 6-1=5
+            if (effectiveRoll < 1) effectiveRoll = rollResult; // if 1-1=0, just use 1
+            
+            player.hasDiceModifier = false;
+            modifierUsed = true;
+        }
+
+        elements.lastRoll.textContent = `AI ${player.name} chose ${direction}, base roll ${rollResult}.`;
+        if (modifierUsed) elements.lastRoll.textContent += ` Used modifier for ${effectiveRoll}.`;
+        await delay(1000);
+
+        const { newPos, stepsTaken } = calculateNewPosition(player.position, direction, effectiveRoll);
+        player.position = newPos;
+        hasRolled = true; // Set global 'hasRolled'
+        rollResult = 0; // Clear global 'rollResult'
+
+        gameState.gameLog.push({ time: Date.now(), message: `AI ${player.name} moved ${direction} ${stepsTaken} steps to Tile ${newPos}.` });
+        
+        // This sync will show the token move
+        syncGameState(); 
+        
+        // Wait for move animation to be seen
+        await delay(1000); 
+
+        // --- 2. LANDING PHASE ---
+        // Manually replicate handleLanding() logic for AI
+        
+        const tile = gameState.board[newPos];
+        
+        // Check Cash Drop
+        if (tile.cashDrop > 0) {
+            player.money = parseFloat((player.money + tile.cashDrop).toFixed(2));
+            gameState.gameLog.push({ time: Date.now(), message: `AI ${player.name} collected $${tile.cashDrop.toFixed(2)}.` });
+            tile.cashDrop = 0;
+            syncGameState(); // Show cash pickup
+            await delay(500);
+        }
+
+        // Check Special Tiles
+        if (tile.type === 'city_center') {
+            activateActionCard(player);
+            syncGameState();
+            await delay(1000);
+        } else if (tile.type === 'subway') {
+            // This is a special case. aiTeleport will call nextTurn() itself.
+            await aiTeleport(player, newPos); 
+            return; // The turn ends after teleport.
+        } else if (tile.owner !== 0 && tile.owner !== player.id) {
+            payRent(player, tile); // This function handles everything
+            syncGameState();
+            await delay(1000);
+        }
+
+        if (player.isBankrupt) {
+            endAITurn(); // FIX: Call endAITurn
+            return;
+        }
+
+        // --- 3. ACTION PHASE ---
+        if (tile.type === 'property') {
+            // AI Strategy: Always buy if unowned and can afford
+            if (tile.owner === 0 && player.money >= BUY_COST_LEVEL_1) {
+                gameState.gameLog.push({ time: Date.now(), message: `AI ${player.name} is purchasing Tile ${tile.id}.` });
+                await delay(1000);
+                buyProperty(); // This function uses global state, which is correct
+            } 
+            // AI Strategy: Always enhance if owned and can afford
+            else if (tile.owner === player.id && tile.level === 1 && player.money >= ENHANCE_COST_LEVEL_2) {
+                gameState.gameLog.push({ time: Date.now(), message: `AI ${player.name} is enhancing Tile ${tile.id}.` });
+                await delay(1000);
+                buyProperty();
+            }
+        } else if (tile.type === 'bank') {
+            await aiBankAction(player);
+        } else if (tile.type === 'store') {
+            await aiStoreAction(player);
+        }
+
+        syncGameState(); // Show results of actions
+        await delay(1500);
+
+        // --- 4. END TURN ---
+        endAITurn(); // FIX: Replace all manual logic with one call
+    };
+
+
+    // --- UI SYNCHRONIZATION ---
+
+    const syncGameState = () => {
+        if (!gameState) return;
+
+        const player = gameState.players[gameState.currentPlayerIndex];
+        const tile = gameState.board[player.position];
+
+        // --- 1. Update Player Cards ---
+        elements.playerCardsContainer.innerHTML = '';
+        gameState.players.forEach((p, index) => {
+            const playerColor = PLAYER_COLORS.find(c => c.id === p.id);
+            const isTurn = index === gameState.currentPlayerIndex && gameState.isGameRunning;
+            
+            let propertiesOwned = gameState.board.filter(t => t.owner === p.id).length;
+            let debtIndicator = p.debt > 0 ? `<div class="font-bold text-red-500">DEBT: $${p.debt.toFixed(2)}</div>` : '';
+            if (p.isGraceRound) debtIndicator = `<div class="font-bold text-yellow-600">DEBT (Grace): $${p.debt.toFixed(2)}</div>`;
+
+            let cardClass = 'bg-white p-4 rounded-xl shadow-lg border-2';
+            if (isTurn) cardClass += ' border-blue-500 ring-4 ring-blue-200';
+            else cardClass += ' border-transparent';
+            
+            if (p.isBankrupt) cardClass += ' opacity-50 bg-gray-100';
+
+            const upgrades = [];
+            if (p.hasDiagonalMove) upgrades.push('Diagonal');
+            if (p.hasDiceModifier) upgrades.push('Modifier');
+            
+            elements.playerCardsContainer.innerHTML += `
+                <div class="${cardClass}">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="text-lg font-bold ${playerColor.text}">${p.name} ${p.isBankrupt ? '(Bankrupt)' : ''}</h3>
+                        <div class="w-5 h-5 rounded-full ${playerColor.bg} border-2 border-white shadow-sm"></div>
+                    </div>
+                    <div class="text-gray-700">
+                        <div class="text-2xl font-semibold mb-1">$${p.money.toFixed(2)}</div>
+                        ${debtIndicator}
+                        <div class="text-sm">Properties: ${propertiesOwned}</div>
+                        <div class="text-sm">Upgrades: ${upgrades.length > 0 ? upgrades.join(', ') : 'None'}</div>
+                    </div>
+                </div>
+            `;
+        });
+
+        // --- 2. Update Board Tiles ---
+        elements.board.innerHTML = '';
+        gameState.board.forEach(t => {
+            let tileClass = 'tile';
+            let tileContentHtml = ''; // Use this for main content
+            let ownerColor = '';
+            let tileIdHtml = `<div class="absolute top-1 right-1 text-xs text-gray-400 font-medium">${t.id}</div>`;
+
+            if (t.owner !== 0) {
+                const owner = PLAYER_COLORS.find(p => p.id === t.owner);
+                ownerColor = owner.hex;
+                // Property info for owned tiles
+                tileContentHtml = `
+                    <div class="property-info">
+                        <span class="house-icon" style="color: ${owner.hex};">🏠</span>
+                        <span class="level-text">Lvl: ${t.level}</span>
+                    </div>
+                `;
+                // Add specific level classes for background color
+                if (t.level === 1) tileClass += ' level-1';
+                if (t.level === 2) tileClass += ' level-2';
+            } else {
+                tileClass += ' tile-owner-bank';
+            }
+
+            // Special Tiles override default property info
+            if (t.type === 'bank') {
+                tileClass += ' tile-bank';
+                tileContentHtml = 'BANK';
+                tileIdHtml = ''; // No subtle ID for special tiles
+            } else if (t.type === 'store') {
+                tileClass += ' tile-store';
+                tileContentHtml = 'STORE';
+                tileIdHtml = '';
+            } else if (t.type === 'city_center') {
+                tileClass += ' tile-city-center';
+                tileContentHtml = 'CITY CENTER';
+                tileIdHtml = '';
+            } else if (t.type === 'subway') {
+                tileClass += ' tile-subway';
+                tileContentHtml = 'SUBWAY';
+                tileIdHtml = '';
+            } else if (t.type === 'street_segment') {
+                tileClass += ' tile-street-segment';
+                tileContentHtml = ''; // No text for street segments, only subtle ID
+            }
+            
+            // Cash Drop Indicator
+            let cashDropHtml = '';
+            if (t.cashDrop > 0) {
+                cashDropHtml = `<div class="cash-drop-indicator">$${t.cashDrop.toFixed(0)}</div>`;
+            }
+
+            // Player Tokens
+            let playerTokensHtml = '';
+            const playersOnTile = gameState.players.filter(p => p.position === t.id && !p.isBankrupt);
+            playersOnTile.forEach((p, index) => {
+                const pos = TOKEN_POSITIONS[p.id - 1] || TOKEN_POSITIONS[0]; // Use player ID to get consistent position
+                playerTokensHtml += `<div class="player-token" style="background-color: ${p.color}; bottom: ${pos.bottom}; right: ${pos.right}; top: ${pos.top}; left: ${pos.left}; z-index: ${pos.z};"></div>`;
+            });
+
+            elements.board.innerHTML += `
+                <div class="${tileClass}" id="tile-${t.id}" style="border-color: ${ownerColor || '#d1d5db'}; ${ownerColor ? 'border-width: 3px;' : ''}" data-id="${t.id}">
+                    <span class="text-center">${tileContentHtml}</span>
+                    ${tileIdHtml}
+                    ${cashDropHtml}
+                    ${playerTokensHtml}
+                </div>
+            `;
+        });
+        
+        // --- 3. Update Bank & Log ---
+        elements.bankMoney.textContent = gameState.bankMoney.toFixed(2);
+        elements.gameLog.innerHTML = '';
+        gameState.gameLog.slice().reverse().forEach(log => {
+            elements.gameLog.innerHTML += `<div class="p-2 rounded bg-gray-50 border-l-4 border-gray-300">${log.message}</div>`;
+        });
+        elements.gameLog.scrollTop = 0; // Show latest message
+
+        // --- 4. Update Controls ---
+        
+        // Block all controls if game over
+        if (!gameState.isGameRunning) {
+            elements.turnIndicator.textContent = "Game Over!";
+            elements.rollMoveBtn.disabled = true;
+            elements.buyPropertyBtn.disabled = true;
+            elements.specialActionBtn.disabled = true;
+            elements.nextTurnBtn.disabled = true;
+            elements.directionalControls.classList.add('opacity-50', 'pointer-events-none');
+            return;
+        }
+
+        // Block controls if it's an AI turn
+        if (player.isAI || aiTurnInProgress) {
+            elements.turnIndicator.innerHTML = `AI Turn: <span style="color: ${player.color};">${player.name}</span> is thinking...`;
+            elements.rollMoveBtn.disabled = true;
+            elements.buyPropertyBtn.disabled = true;
+            elements.specialActionBtn.disabled = true;
+            elements.nextTurnBtn.disabled = true;
+            elements.directionalControls.classList.add('opacity-50', 'pointer-events-none');
+        } 
+        // Enable controls for Human turn
+        else {
+            elements.turnIndicator.innerHTML = `Your Turn: <span style="color: ${player.color};">${player.name}</span>`;
+            elements.directionalControls.classList.remove('opacity-50', 'pointer-events-none');
+
+            // --- Update Directional Controls ---
+            elements.directionalControls.innerHTML = '';
+            const validDirections = getValidDirections(player.position, player.hasDiagonalMove);
+            const midPoint = { dr: 0, dc: 0 };
+            
+            // 3x3 Grid for directions
+            for (let dr = -1; dr <= 1; dr++) {
+                for (let dc = -1; dc <= 1; dc++) {
+                    if (dr === 0 && dc === 0) {
+                        elements.directionalControls.innerHTML += `<div class="flex items-center justify-center w-8 h-8 font-bold text-gray-500">&#9679;</div>`;
+                        continue;
+                    }
+                    
+                    const dirKey = Object.keys(MOVE_DIRECTIONS).find(key => {
+                        const move = MOVE_DIRECTIONS[key];
+                        return move.dr === dr && move.dc === dc;
+                    });
+                    
+                    if (dirKey && validDirections.includes(dirKey)) {
+                         elements.directionalControls.innerHTML += `
+                            <label class="flex items-center justify-center w-8 h-8 rounded-md cursor-pointer hover:bg-blue-100 peer-checked:bg-blue-500 peer-checked:text-white">
+                                <input type="radio" name="direction" value="${dirKey}" class="sr-only peer">
+                                <span class="text-xl">${MOVE_DIRECTIONS[dirKey].symbol}</span>
+                            </label>
+                        `;
+                    } else {
+                         elements.directionalControls.innerHTML += `<div class="flex items-center justify-center w-8 h-8 text-gray-300">${MOVE_DIRECTIONS[dirKey]?.symbol || ''}</div>`;
+                    }
+                }
+            }
+
+
+            // Roll/Move Button
+            elements.rollMoveBtn.disabled = hasRolled;
+            elements.rollMoveBtn.textContent = 'Roll & Move';
+            
+            // Dice Modifier
+            elements.diceModifierBtn.classList.add('hidden');
+            elements.diceModifierBtn.disabled = true;
+
+            // Next Turn Button
+            elements.nextTurnBtn.disabled = !hasRolled || checkAutoNextTurn(player, tile) === false;
+            
+            // Buy/Enhance Button
+            let canBuy = (tile.type === 'property') && 
+                         ((tile.owner === 0 && player.money >= BUY_COST_LEVEL_1) || 
+                          (tile.owner === player.id && tile.level === 1 && player.money >= ENHANCE_COST_LEVEL_2));
+            elements.buyPropertyBtn.disabled = !hasRolled || !canBuy;
+            if (tile.owner === 0) elements.buyPropertyBtn.textContent = `Buy ($${BUY_COST_LEVEL_1})`;
+            else elements.buyPropertyBtn.textContent = `Enhance ($${ENHANCE_COST_LEVEL_2})`;
+
+            // Special Action Button
+            let canDoSpecial = (tile.type === 'bank' || tile.type === 'store');
+            elements.specialActionBtn.disabled = !hasRolled || !canDoSpecial;
+            if (canDoSpecial) {
+                elements.specialActionBtn.classList.remove('hidden');
+                elements.specialActionBtn.textContent = (tile.type === 'bank') ? 'Use Bank' : 'Use Store';
+            } else {
+                elements.specialActionBtn.classList.add('hidden');
+            }
+        }
+        
+        // --- 5. Start AI Turn (if applicable) ---
+        if (player.isAI && !aiTurnInProgress && gameState.isGameRunning && gameState.setupPhase === 'playing') {
+            aiTurnInProgress = true;
+            setTimeout(() => runAITurn(player), 1500); // Give 1.5s for human to read the board
+        }
+    };
+
+</script>
+
+</body>
+</html>
